@@ -10,3 +10,10 @@
 /obj/Debug/net6.0-windows/PdfWatermark.sourcelink.json
 /bin/Debug/net6.0-windows
 /obj/Debug/net6.0-windows
+/obj/Debug/net6.0-windows/PdfWatermark.assets.cache
+/obj/Debug/net6.0-windows/PdfWatermark.csproj.AssemblyReference.cache
+/obj/Debug/net6.0-windows/PdfWatermark.csproj.CoreCompileInputs.cache
+/obj/PdfWatermark.csproj.nuget.dgspec.json
+/obj/PdfWatermark.csproj.nuget.g.targets
+/obj/project.assets.json
+/obj/project.nuget.cache
