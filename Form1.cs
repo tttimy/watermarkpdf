@@ -6,6 +6,7 @@ using iText.Kernel.Pdf.Xobject;
 using iText.Kernel.Font;
 using iText.IO.Font;
 using iText.IO.Font.Constants;
+using iText.Kernel.Pdf.Extgstate;
 
 namespace PdfWatermark;
 
@@ -104,73 +105,157 @@ public partial class Form1 : Form
             progressBar.Value = 0;
         }
     }
-    private void AddWatermark(string text, float fontSize, float rotation, int opacity, float relativeSize, int lines, string fontFamily, System.Drawing.Color color)
+
+    /// <summary>主线程更新进度与状态文本</summary>
+    private void UpdateProgress(int current, int total, string statusText)
     {
-        string inputPath = txtInputPath.Text;
-        string outputPath = txtOutputPath.Text;
-
-        using var reader = new PdfReader(inputPath);
-        using var writer = new PdfWriter(outputPath);
-        using var pdfDoc = new PdfDocument(reader, writer);
-
-        int numberOfPages = pdfDoc.GetNumberOfPages();
-
-        // 加载字体
-        var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
-
-        for (int i = 1; i <= numberOfPages; i++)
+        if (this.InvokeRequired)
         {
-            var page = pdfDoc.GetPage(i);
-            var pageSize = page.GetPageSize();
-            float pageWidth = pageSize.GetWidth();
-            float pageHeight = pageSize.GetHeight();
+            this.Invoke(new Action(() => UpdateProgress(current, total, statusText)));
+            return;
+        }
+        progressBar.Maximum = 100;
+        progressBar.Value = (int)(current / (float)total * 100);
+        lblStatus.Text = statusText;
+    }
 
-            float scaledFontSize = fontSize * relativeSize * (pageWidth / 1000f);
+    /// <summary>
+    /// PDF批量添加斜向铺满水印（iText7）
+    /// </summary>
+    /// <param name="text">水印文字</param>
+    /// <param name="fontSize">基础字号</param>
+    /// <param name="rotation">旋转角度(°)</param>
+    /// <param name="opacity">透明度 0~100</param>
+    /// <param name="relativeSize">页面相对缩放系数</param>
+    /// <param name="lines">纵向重复行数</param>
+    /// <param name="fontFamily">字体名称，如微软雅黑 Microsoft YaHei</param>
+    /// <param name="color">水印颜色</param>
+    private async void AddWatermark(string text, float fontSize, float rotation, int opacity, float relativeSize, int lines, string fontFamily, System.Drawing.Color color)
+    {
+        // 1. 基础参数校验
+        string inputPath = txtInputPath.Text.Trim();
+        string outputPath = txtOutputPath.Text.Trim();
+        if (!File.Exists(inputPath))
+        {
+            MessageBox.Show("源PDF文件不存在！");
+            return;
+        }
+        if (string.IsNullOrEmpty(outputPath))
+        {
+            MessageBox.Show("请选择输出保存路径！");
+            return;
+        }
+        if (opacity < 0) opacity = 0;
+        if (opacity > 100) opacity = 100;
 
-            var canvas = new PdfCanvas(page.NewContentStreamAfter(), page.GetResources(), pdfDoc);
+        // UI前置锁定
+        progressBar.Value = 0;
 
-            // 设置透明度
-            var gs1 = new iText.Kernel.Pdf.Extgstate.PdfExtGState().SetFillOpacity(opacity / 100f);
-            canvas.SaveState();
-            canvas.SetExtGState(gs1);
-
-            // 设置颜色
-            canvas.SetFillColor(new DeviceRgb(color.R, color.G, color.B));
-
-            // 计算水印位置
-            float stepY = pageHeight / (lines + 1);
-            float xPos = pageWidth / 2;
-
-            for (int line = 0; line < lines; line++)
+        try
+        {
+            // 后台执行PDF操作，不阻塞UI
+            await Task.Run(() =>
             {
-                float yPos = stepY * (line + 1);
+                // 加载字体：优先自定义字体，失败回退默认黑体
+                PdfFont font;
+                try
+                {
+                    font = PdfFontFactory.CreateFont(fontFamily, PdfEncodings.IDENTITY_H, PdfFontFactory.EmbeddingStrategy.PREFER_EMBEDDED);
+                }
+                catch
+                {
+                    font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
+                    // 回退到程序自带的 simsun.ttc
+                    //string fallbackPath = Path.Combine(AppDomain.CurrentDomain.BaseDirectory, "Fonts", "simsun.ttc");
+                    //if (File.Exists(fallbackPath))
+                    //    font = PdfFontFactory.CreateFont(fallbackPath, 0, PdfEncodings.IDENTITY_H);
+                    //else
+                    //    // 最后尝试系统路径
+                    //    font = PdfFontFactory.CreateFont(@"C:\Windows\Fonts\simsun.ttc", 0, PdfEncodings.IDENTITY_H);
+                }
 
-                // 旋转
-                canvas.SaveState();
-                canvas.ConcatMatrix((float)Math.Cos(rotation * Math.PI / 180), (float)Math.Sin(rotation * Math.PI / 180),
-                                    (float)-Math.Sin(rotation * Math.PI / 180), (float)Math.Cos(rotation * Math.PI / 180),
-                                    xPos, yPos);
+                using var reader = new PdfReader(inputPath);
+                using var writer = new PdfWriter(outputPath);
+                using var pdfDoc = new PdfDocument(reader, writer);
 
-                canvas.BeginText();
-                canvas.SetFontAndSize(font, scaledFontSize);
-                // 居中对齐
-                float textWidth = font.GetWidth(text, scaledFontSize);
-                canvas.MoveText(-textWidth / 2, 0);
-                canvas.ShowText(text);
-                canvas.EndText();
+                int pageCount = pdfDoc.GetNumberOfPages();
+                double rad = rotation * Math.PI / 180;
+                float alpha = opacity / 100f;
 
-                canvas.RestoreState();
-            }
+                for (int pageIdx = 1; pageIdx <= pageCount; pageIdx++)
+                {
+                    var page = pdfDoc.GetPage(pageIdx);
+                    var pageRect = page.GetPageSize();
+                    float pw = pageRect.GetWidth();
+                    float ph = pageRect.GetHeight();
 
-            canvas.RestoreState();
+                    // 自适应字号，宽高共同参与缩放
+                    float baseScale = Math.Min(pw, ph) / 1000f;
 
-            // 进度条
-            this.Invoke((Action)(() =>
-            {
-                progressBar.Value = (int)((float)i / numberOfPages * 100);
-                lblStatus.Text = $"正在处理... 第 {i}/{numberOfPages} 页";
-                Application.DoEvents();
-            }));
+                    if (relativeSize <= 0) relativeSize = 1.0f;
+                    float realFontSize = fontSize * relativeSize * (Math.Min(pw, ph) / 1000f);
+                    if (realFontSize < 6) realFontSize = 12; // 可读下限
+                    // 新建后置画布（水印在底层内容下方，不遮挡文字）
+                    PdfCanvas canvas = new PdfCanvas(page.NewContentStreamAfter(), page.GetResources(), pdfDoc);
+                    // 透明度扩展图形状态
+                    PdfExtGState transparentGs = new PdfExtGState()
+                        .SetFillOpacity(alpha)
+                        .SetStrokeOpacity(alpha);
+
+                    canvas.SaveState();
+                    canvas.SetExtGState(transparentGs);
+                    canvas.SetFillColor(new DeviceRgb(color.R / 255f, color.G / 255f, color.B / 255f));
+
+                    float stepY = ph / (lines + 1);
+                    float centerX = pw / 2;
+
+                    for (int line = 0; line < lines; line++)
+                    {
+                        float centerY = stepY * (line + 1);
+
+                        canvas.SaveState();
+                        // 旋转矩阵
+                        canvas.ConcatMatrix(
+                            (float)Math.Cos(rad), (float)Math.Sin(rad),
+                            -(float)Math.Sin(rad), (float)Math.Cos(rad),
+                            centerX, centerY
+                        );
+
+                        canvas.BeginText();
+                        canvas.SetFontAndSize(font, realFontSize);
+                        float textW = font.GetWidth(text, realFontSize);
+                        canvas.MoveText(-textW / 2, 0); // 文字居中
+                        canvas.ShowText(text);
+                        canvas.EndText();
+
+                        canvas.RestoreState();
+                    }
+
+                    canvas.RestoreState();
+                    canvas.Release();
+
+                    // 更新UI进度（主线程同步）
+                    int currentPage = pageIdx;
+                    UpdateProgress(pageIdx, pageCount, $"处理中 {pageIdx}/{pageCount} 页");
+                }
+
+                pdfDoc.Close();
+                writer.Close();
+                reader.Close();
+            });
+
+            MessageBox.Show($"处理完毕，文件已保存至：\n{outputPath}");
+        }
+        catch (IOException ex)
+        {
+            MessageBox.Show($"文件读写异常：{ex.Message}\n请关闭占用PDF的程序后重试");
+        }
+        catch (Exception ex)
+        {
+            MessageBox.Show($"处理失败：{ex.Message}");
+        }
+        finally
+        {
         }
     }
 
