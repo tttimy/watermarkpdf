@@ -5,6 +5,7 @@ using iText.Kernel.Pdf.Canvas;
 using iText.Kernel.Pdf.Xobject;
 using iText.Kernel.Font;
 using iText.IO.Font;
+using iText.IO.Font.Constants;
 
 namespace PdfWatermark;
 
@@ -103,87 +104,67 @@ public partial class Form1 : Form
             progressBar.Value = 0;
         }
     }
-
     private void AddWatermark(string text, float fontSize, float rotation, int opacity, float relativeSize, int lines, string fontFamily, System.Drawing.Color color)
     {
         string inputPath = txtInputPath.Text;
         string outputPath = txtOutputPath.Text;
 
-        PdfReader reader = new PdfReader(inputPath);
-        PdfWriter writer = new PdfWriter(outputPath, new iText.Kernel.Properties().SetPdfVersion(iText.Kernel.Properties.PdfVersion.PDF_2_0));
-        PdfDocument pdfDoc = new PdfDocument(reader, writer);
+        using var reader = new PdfReader(inputPath);
+        using var writer = new PdfWriter(outputPath);
+        using var pdfDoc = new PdfDocument(reader, writer);
 
         int numberOfPages = pdfDoc.GetNumberOfPages();
-        
-        iText.Kernel.Geom.Rectangle pageSize = pdfDoc.GetFirstPage().GetPageSize();
-        float pageWidth = pageSize.GetWidth();
-        float pageHeight = pageSize.GetHeight();
 
-        float scaledFontSize = fontSize * relativeSize * (pageWidth / 1000f);
+        // 加载字体
+        var font = PdfFontFactory.CreateFont(StandardFonts.HELVETICA);
 
         for (int i = 1; i <= numberOfPages; i++)
         {
-            iText.Kernel.Pdf.Page page = pdfDoc.GetPage(i);
-            pageSize = page.GetPageSize();
-            pageWidth = pageSize.GetWidth();
-            pageHeight = pageSize.GetHeight();
+            var page = pdfDoc.GetPage(i);
+            var pageSize = page.GetPageSize();
+            float pageWidth = pageSize.GetWidth();
+            float pageHeight = pageSize.GetHeight();
 
-            PdfCanvas canvas = new PdfCanvas(page);
-            PdfFormXObject watermarkLayer = new PdfFormXObject(pageSize);
-            iText.Kernel.Pdf.Canvas.PdfCanvas layerCanvas = new iText.Kernel.Pdf.Canvas.PdfCanvas(watermarkLayer, pdfDoc);
+            float scaledFontSize = fontSize * relativeSize * (pageWidth / 1000f);
 
-            using MemoryStream ms = new MemoryStream();
-            using var bmp = new Bitmap(1, 1);
-            using var g = Graphics.FromImage(bmp);
-            int emSize = (int)scaledFontSize;
-            using var font = new Font(fontFamily, emSize, FontStyle.Regular, GraphicsUnit.Pixel);
-            SizeF textSize = g.MeasureString(text, font, 10000);
-            
-            float textWidth = (float)textSize.Width;
-            float textHeight = (float)textSize.Height;
-            
-            if (relativeSize != 0)
-            {
-                float targetWidth = pageWidth * 0.3f * relativeSize;
-                if (textWidth > targetWidth && targetWidth > 0)
-                {
-                    textWidth = targetWidth;
-                    textHeight = textHeight * (targetWidth / (float)textSize.Width);
-                }
-            }
+            var canvas = new PdfCanvas(page.NewContentStreamAfter(), page.GetResources(), pdfDoc);
 
-            if (string.IsNullOrWhiteSpace(text))
-            {
-                continue;
-            }
+            // 设置透明度
+            var gs1 = new iText.Kernel.Pdf.Extgstate.PdfExtGState().SetFillOpacity(opacity / 100f);
+            canvas.SaveState();
+            canvas.SetExtGState(gs1);
 
-            int textAlpha = (int)(opacity / 100f * 255);
+            // 设置颜色
+            canvas.SetFillColor(new DeviceRgb(color.R, color.G, color.B));
+
+            // 计算水印位置
             float stepY = pageHeight / (lines + 1);
-            float stepX = pageWidth / 2;
-
-            layerCanvas.SaveState();
-            layerCanvas.BeginText();
-            layerCanvas.SetFontAndSize(iText.IO.Font.Constants.StandardFonts.HELVETICA, scaledFontSize * 0.7f);
-            layerCanvas.SetFillColor(new DeviceCmyk(color.R / 255f, color.G / 255f, color.B / 255f, color.A / 255f));
-            
-            float angle = (float)(rotation * Math.PI / 180);
-            layerCanvas.ConcatMatrix((float)Math.Cos(angle), (float)Math.Sin(angle), (float)-Math.Sin(angle), (float)Math.Cos(angle), 0, 0);
+            float xPos = pageWidth / 2;
 
             for (int line = 0; line < lines; line++)
             {
                 float yPos = stepY * (line + 1);
-                float xPos = stepX;
-                
-                layerCanvas.ShowTextAligned(text, xPos, yPos, iText.Kernel.Geom.Constants.TextAlignment.CENTER, 
-                    iText.Kernel.Geom.VerticalAlignment.BOTTOM, angle);
+
+                // 旋转
+                canvas.SaveState();
+                canvas.ConcatMatrix((float)Math.Cos(rotation * Math.PI / 180), (float)Math.Sin(rotation * Math.PI / 180),
+                                    (float)-Math.Sin(rotation * Math.PI / 180), (float)Math.Cos(rotation * Math.PI / 180),
+                                    xPos, yPos);
+
+                canvas.BeginText();
+                canvas.SetFontAndSize(font, scaledFontSize);
+                // 居中对齐
+                float textWidth = font.GetWidth(text, scaledFontSize);
+                canvas.MoveText(-textWidth / 2, 0);
+                canvas.ShowText(text);
+                canvas.EndText();
+
+                canvas.RestoreState();
             }
 
-            layerCanvas.EndText();
-            layerCanvas.RestoreState();
+            canvas.RestoreState();
 
-            canvas.AddXObject(watermarkLayer);
-            canvas.Release();
-
+            // 进度条
             this.Invoke((Action)(() =>
             {
                 progressBar.Value = (int)((float)i / numberOfPages * 100);
@@ -191,7 +172,7 @@ public partial class Form1 : Form
                 Application.DoEvents();
             }));
         }
-
-        pdfDoc.Close();
     }
+
+
 }
