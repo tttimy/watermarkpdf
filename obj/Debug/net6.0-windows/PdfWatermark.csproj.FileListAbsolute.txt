@@ -1,5 +1,0 @@
-D:\works\Code\temp\watermark\PdfWatermark\obj\Debug\net6.0-windows\PdfWatermark.csproj.AssemblyReference.cache
-D:\works\Code\temp\watermark\PdfWatermark\obj\Debug\net6.0-windows\PdfWatermark.GeneratedMSBuildEditorConfig.editorconfig
-D:\works\Code\temp\watermark\PdfWatermark\obj\Debug\net6.0-windows\PdfWatermark.AssemblyInfoInputs.cache
-D:\works\Code\temp\watermark\PdfWatermark\obj\Debug\net6.0-windows\PdfWatermark.AssemblyInfo.cs
-D:\works\Code\temp\watermark\PdfWatermark\obj\Debug\net6.0-windows\PdfWatermark.csproj.CoreCompileInputs.cache
